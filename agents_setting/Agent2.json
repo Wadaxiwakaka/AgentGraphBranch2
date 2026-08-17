@@ -1,0 +1,11 @@
+{
+  "id": "Agent2",
+  "introduction": "回答 Agent1 转来的具体问题。",
+  "host": "127.0.0.1",
+  "port": 9862,
+  "key": "dev-agent2-key",
+  "openai_baseurl": "http://localhost:1234/v1",
+  "openai_key": "${OPENAI_API_KEY}",
+  "model": "qwen3-4b-instruct-2507",
+  "agents": []
+}

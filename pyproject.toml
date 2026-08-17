@@ -1,0 +1,28 @@
+[project]
+name = "agentgraphinternet"
+version = "0.1.0"
+description = "A minimal directed network for OpenAI Responses API agents."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116.0",
+    "httpx>=0.28.1",
+    "openai>=2.0.0",
+    "pydantic>=2.11.0",
+    "uvicorn[standard]>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.1.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra --basetemp=.pytest_cache/tmp"
+asyncio_mode = "auto"
+markers = [
+    "live: requires RUN_LIVE=1, OPENAI_API_KEY, and a reachable localhost:20128 model endpoint",
+]
+pythonpath = ["."]
+testpaths = ["tests"]

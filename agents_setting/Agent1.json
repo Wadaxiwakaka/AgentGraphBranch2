@@ -1,0 +1,19 @@
+{
+  "id": "Agent1",
+  "introduction": "协调请求，并在需要时询问 Agent2。",
+  "host": "127.0.0.1",
+  "port": 9861,
+  "key": "dev-agent1-key",
+  "openai_baseurl": "http://localhost:1234/v1",
+  "openai_key": "${OPENAI_API_KEY}",
+  "model": "qwen3-4b-instruct-2507",
+  "agents": [
+    {
+      "id": "Agent2",
+      "ip": "127.0.0.1",
+      "protocol": "http",
+      "port": 9862,
+      "key": "dev-agent2-key"
+    }
+  ]
+}
