@@ -417,6 +417,7 @@ AgentGraph/
 | `include_encrypted_reasoning` | boolean | 否            | `true`      | 是否请求并回放加密 reasoning item           |
 | `max_tool_calls_per_turn`     | integer | 否            | `200`       | 单轮工具调用总上限                          |
 | `max_response_steps_per_turn` | integer | 否            | `256`       | 单轮 Responses 请求步数上限                 |
+| `max_context_chars`          | integer \| null | 否     | `null`      | 会话上下文字符预算；启用后从最旧单元裁剪，`function_call` 与其结果同进退，保留最新单元不清空 |
 | `topology_max_nodes`          | integer | 否            | `1000`      | 拓扑节点及不可信记录预算                    |
 | `topology_max_depth`          | integer | 否            | `64`        | 拓扑递归深度上限                            |
 

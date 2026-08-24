@@ -913,6 +913,9 @@ class AgentRemote:
                     status_code=502,
                 )
             response_steps += 1
+            # 迭代顶部时上一批 function_call 必已配对 output（含拒绝/取消路径），
+            # 在此裁剪不会切到“调用已入上下文、结果未回”的中间态。
+            chat.trim_context(self.config.max_context_chars)
             create_arguments: dict[str, Any] = {
                 "model": self.config.model,
                 "input": chat.get_context_messages(),

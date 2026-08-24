@@ -125,6 +125,8 @@ class AgentConfig(BaseModel):
         include_encrypted_reasoning: 是否把加密推理项纳入 Responses API 上下文。
         max_tool_calls_per_turn: 每轮允许的最大工具调用数，必须为正整数。
         max_response_steps_per_turn: 每轮允许的最大响应步骤数，必须为正整数。
+        max_context_chars: 会话上下文的字符预算；省略或为 ``None`` 时不裁剪，
+            启用后超限的会话会从最旧内容开始裁剪（见 ``ChatSpace.trim_context``）。
         topology_max_nodes: 拓扑查询允许访问的最大节点数，必须为正整数。
         topology_max_depth: 拓扑查询允许递归的最大深度，必须为正整数。
 
@@ -155,6 +157,7 @@ class AgentConfig(BaseModel):
     include_encrypted_reasoning: bool = True
     max_tool_calls_per_turn: int = Field(default=200, gt=0)
     max_response_steps_per_turn: int = Field(default=256, gt=0)
+    max_context_chars: int | None = Field(default=None, gt=0)
     topology_max_nodes: int = Field(default=1000, gt=0)
     topology_max_depth: int = Field(default=64, gt=0)
 
@@ -666,6 +669,19 @@ def register_api_error_handlers(app: FastAPI) -> None:
         )
 
 
+@dataclass
+class _ContextTrimUnit:
+    """裁剪单元：一个或多个 context item 下标组成的不可分割整体。
+
+    ``function_call`` 与其同 ``call_id`` 的 ``function_call_output`` 绑定进同一
+    单元，保证裁剪不会产生孤儿调用或孤儿结果；其余 item 各自独立成单元。
+    记录下标而非内容，重建时才能保持剩余 item 的原始相对顺序。
+    """
+
+    item_indices: list[int]
+    char_size: int = 0
+
+
 class ChatSpace:
     """维护两个 Agent 之间同时面向人类和 Responses API 的本地会话。
 
@@ -847,6 +863,77 @@ class ChatSpace:
                 "output": deepcopy(output),
             }
         )
+
+    def _build_trim_units(self) -> list[_ContextTrimUnit]:
+        """把当前 context_items 划分为有序裁剪单元并累计序列化字符数。"""
+
+        units: list[_ContextTrimUnit] = []
+        unit_by_call_id: dict[str, _ContextTrimUnit] = {}
+        for index, item in enumerate(self.context_items):
+            item_type = item.get("type")
+            call_id = item.get("call_id")
+            if item_type == "function_call" and isinstance(call_id, str):
+                unit = _ContextTrimUnit(item_indices=[index])
+                unit_by_call_id[call_id] = unit
+                units.append(unit)
+            elif item_type == "function_call_output" and isinstance(call_id, str):
+                paired = unit_by_call_id.get(call_id)
+                if paired is None:
+                    # 批次预检保证 call 与 output 配对；孤儿 output 理论不应出现，
+                    # 出现时按独立单元裁剪而不是抛异常，避免裁剪路径放大故障。
+                    units.append(_ContextTrimUnit(item_indices=[index]))
+                else:
+                    paired.item_indices.append(index)
+            else:
+                units.append(_ContextTrimUnit(item_indices=[index]))
+        for unit in units:
+            unit.char_size = sum(
+                len(json.dumps(self.context_items[index], ensure_ascii=False))
+                for index in unit.item_indices
+            )
+        return units
+
+    def trim_context(self, max_chars: int | None) -> int:
+        """按字符预算从最旧单元开始裁剪 Responses API 上下文。
+
+        参数:
+            max_chars: 上下文序列化字符总数上限；``None`` 表示不裁剪。
+
+        返回值:
+            被移除的裁剪单元数；未超预算或未启用时为 ``0``。
+
+        异常:
+            item 含无法 JSON 序列化对象时传播 ``TypeError``；此时会话保持不变。
+
+        状态变化:
+            超预算时原地重建 ``context_items``：从最旧单元开始整单元移除，直到
+            总量回到预算内或只剩最后一个单元（宁可超预算也不清空上下文）。
+            ``function_call`` 与其 ``function_call_output`` 同属一个单元，同生共死；
+            ``messages``、``instructions``、``tools`` 和会话身份不受影响。
+        """
+
+        if max_chars is None:
+            return 0
+        units = self._build_trim_units()
+        total = sum(unit.char_size for unit in units)
+        if total <= max_chars:
+            return 0
+        # ponytail: 每次调用全量重算 O(n)，MVP 会话规模（数百 item）足够；
+        # 超大会话再演进为增量缓存序列化长度。
+        removed = 0
+        while total > max_chars and len(units) > 1:
+            total -= units[0].char_size
+            units.pop(0)
+            removed += 1
+        kept_indices = {
+            index for unit in units for index in unit.item_indices
+        }
+        self.context_items = [
+            item
+            for index, item in enumerate(self.context_items)
+            if index in kept_indices
+        ]
+        return removed
 
     def get_context_messages(self) -> list[dict[str, Any]]:
         """返回当前 Responses API 上下文的深拷贝。

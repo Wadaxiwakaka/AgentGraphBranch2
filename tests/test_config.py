@@ -244,6 +244,27 @@ def test_agent_config_requires_positive_limits_and_timeouts(field_name: str) -> 
         core.AgentConfig(**data)
 
 
+def test_agent_config_max_context_chars_defaults_to_none_and_accepts_positive(
+) -> None:
+    data = _valid_agent_data()
+
+    assert core.AgentConfig(**data).max_context_chars is None
+
+    data["max_context_chars"] = 4096
+    assert core.AgentConfig(**data).max_context_chars == 4096
+
+
+@pytest.mark.parametrize("bad_value", [0, -1])
+def test_agent_config_rejects_non_positive_max_context_chars(
+    bad_value: int,
+) -> None:
+    data = _valid_agent_data()
+    data["max_context_chars"] = bad_value
+
+    with pytest.raises(ValidationError):
+        core.AgentConfig(**data)
+
+
 @pytest.mark.parametrize("bad_port", [0, 65536])
 def test_agent_config_rejects_ports_outside_tcp_range(bad_port: int) -> None:
     data = _valid_agent_data()
