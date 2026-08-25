@@ -195,6 +195,35 @@ call_id，不会制造重复；被裁掉的 call_id 若被模型再次发出，�
 - 全量离线回归：`1171 passed, 1 deselected`；唯一失败
   `tests/test_integration_chain.py` 的示例配置契约断言
   （`openai_baseurl` 期望 `:20128`，基线提交中的 `agents_setting/Agent1.json`
-  为 `:1234`）。经 stash 复跑验证：**干净基线同样失败，与本次改动无关**；
-  `agents_setting/` 归仓库所有者，按交接约定不查看、不修改。
+  为 `:1234`）。经 stash 复跑验证：**干净基线同样失败，与本次改动无关**。
+  端口差异原因（2026-08-24 使用者说明）：`20128` 是原维护者（师兄）机器的
+  模型服务端口，`1234` 是当前使用者本机端口，属本机运行需要的本地修改。
+  处置选项：跑验收时按 HANDOFF 建议改用 clean HEAD 配置副本，或保持本地
+  失败为已知状态；测试期望以 README 文档的 `20128` 为仓库契约值，改动需
+  使用者自行决定。
 - `compileall` 通过；README 配置表已补充 `max_context_chars` 行。
+
+## 12. 完成范围与待完善清单（2026-08-24 更新）
+
+### 已完成（Step 1a）
+
+- 配置项 `max_context_chars`（默认 `None` = 不启用，存量 Agent 行为零变化）；
+- `ChatSpace.trim_context()`：最旧优先、`function_call`/`function_call_output`
+  按 call_id 绑定为不可分割单元、保持剩余 item 相对顺序、永不清空；
+- `_run_response_loop` 每次迭代顶部接入裁剪（含拒绝/取消路径的安全性论证，
+  见 §5.4）；
+- 13 个专项测试 + 全量回归 + README 配置行。
+
+### 未完成 / 待完善（按优先级）
+
+| 项 | 现状 | 记录位置 |
+| --- | --- | --- |
+| Step 1b 摘要压缩（compact） | 被裁内容直接丢弃，无摘要替代 | 本文 §3 非目标；[00 路线图](00-gap-analysis.md) Step 1b |
+| token 精确计量 | 字符数近似（约 3~4 字符/token），配置需自行留余量 | 本文 §6；`core.py` 内 `ponytail:` 注释 |
+| 语义感知裁剪 | 不看内容，可能裁掉任务目标描述 | 本文 §6 |
+| 增量长度缓存 | 每步迭代 O(n) 全量重算 | 本文 §6；`core.py` 内 `ponytail:` 注释 |
+| `instructions`/`tools` 不计入预算 | instructions 含 peer metadata JSON，Step 2 Skill 注入后会亚长 | 本节（本次补录） |
+| `messages` 可读视图不受预算约束 | 只影响内存与归档体积，不影响模型调用量 | 本节（本次补录） |
+
+其中后两项是验收复盘时发现的原设计盲区，升级时机：Skill（Step 2）落地后
+若 instructions 总长显著增长，再把 instructions 纳入预算或做压缩。
