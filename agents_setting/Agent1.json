@@ -7,6 +7,7 @@
   "openai_baseurl": "http://localhost:1234/v1",
   "openai_key": "${OPENAI_API_KEY}",
   "model": "qwen3-4b-instruct-2507",
+  "max_context_chars": 500,
   "agents": [
     {
       "id": "Agent2",
