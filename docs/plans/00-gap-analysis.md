@@ -76,7 +76,7 @@ Skill 和知识库反而**加剧**这个问题（注入更多指令与检索内�
 | Step 0 | 本文 | 差距分析与总索引 | 已完成 |
 | Step 1a | [01-context-management-design.md](01-context-management-design.md) | 上下文字符预算与配对安全裁剪 | 已实现（本文档版） |
 | Step 1b | （届期再写） | 超限时模型摘要压缩（compact），替代纯丢弃 | 后置，可选 |
-| Step 2 | （届期再写） | Skill 系统：markdown 指令包 + 配置显式启用 | 待实现 |
+| Step 2 | [02-skill-system-design.md](02-skill-system-design.md) | Skill 系统：markdown 指令包 + 配置显式启用 | 设计已评审，待实现 |
 | Step 3a | （届期再写） | 知识库摄取：本地文档 → 切块 → embedding → 本地索引 | 待实现 |
 | Step 3b | （届期再写） | `search_knowledge` 扩展工具：检索注入工具循环 | 待实现 |
 | Step 4+ | 不设文档 | 流式输出 / 长期记忆 / 沙箱 / 前端 / 可观测性 | 届期逐项评估 |
@@ -89,7 +89,20 @@ Skill 和知识库反而**加剧**这个问题（注入更多指令与检索内�
 - 不破坏 HANDOFF 第 5 节任何不变量，特别是 function_call / function_call_output
   一对一配对、完整 output 回放、会话隔离与脱敏边界。
 
-## 6. 开放问题（开工前与师兄确认）
+## 6. 上下文管理待完善项回头时机（Step 1a 遗留留痕）
+
+Step 1a 只做了字符预算裁剪，以下遗留项均非正确性缺口，按触发条件延后，
+不预先排期：
+
+| 待完善项 | 回头时机（触发条件） | 去处 |
+| --- | --- | --- |
+| 摘要压缩 compact（裁剪→摘要替代丢弃） | 实际使用中模型因被裁内容丢失任务目标（"失忆"） | Step 1b |
+| token 精确计量（字符→tokenizer） | 字符预算与模型窗口配不准、频繁超窗或预算浪费 | Step 1b 或独立小步 |
+| instructions 计入预算 | Skill 静态注入导致 instructions 过长 | 已由 Step 2 字数/数量上限封住盲区，无需计量 |
+| 裁剪增量缓存（每步重算全部长度） | 会话 item 数大到每步 O(n) 计量可观测 | 届期独立小步 |
+| `/history` 只读被裁内容 | 用户提出需要查看完整历史 | `messages` 视图已完整，届时评估检索入口 |
+
+## 7. 开放问题（开工前与师兄确认）
 
 1. 当前主线是数据面三项，还是 HANDOFF 里的控制面路线图？本文假设前者。
 2. Skill 的最终形态预期：静态注入够用，还是要按需触发（类似 Claude Code 的
