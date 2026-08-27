@@ -465,7 +465,7 @@ Skill 是 `skills/` 目录下的 markdown 指令包：头部两行 `key: value`�
 - 省略或 `[]` 不启用，instructions 与未实现 skill 前逐字节一致；
 - 启用列表最多 8 项、不得重复，名字必须在目录加载结果中存在，否则启动即 `ConfigError`；
 - Agent 构造时一次性加载并冻结（与 `ToolRegistry` 同款生命周期），不热加载；重启生效；
-- 启用的 skill 正文按配置顺序以 `<skills>` 区块追加到 instructions 末尾；skill 是本地运维者编写的可信内容，不适用 `peer_metadata` 的不可信声明；
+- 启用的 skill 正文按配置顺序以 `<skills>` 区块追加到 instructions 末尾。当前信任模型：`skills/` 目录的写入权与 `ToolExtension/`（任意 Python 代码）同级，同属本地运维者受信边界，因此不做 `peer_metadata` 式的不可信声明；**引入任何第三方 skill 之前必须先重新设计注入边界**（见 `docs/plans/02-skill-system-design.md` 第 13 节）；
 - 目录缺失或为空均视为空映射，不影响既有部署；`root` 无模型无 instructions，不允许配置 skill；
 - 新增 skill：在 `skills/` 放入合法 `.md` 文件即可注册，配置引用才启用；注册不等于启用。
 

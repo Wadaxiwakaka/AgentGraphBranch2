@@ -721,7 +721,10 @@ class AgentRemote:
             "</peer_metadata>",
         ]
         if self.config.skills:
-            # skill 是本地运维者编写的可信指令包，按配置顺序全量静态注入；
+            # 信任边界：skills/ 目录写入权与 ToolExtension/（任意 Python 代码）
+            # 同级，同属本地运维者受信边界，因此注入时不做不可信声明；
+            # 引入第三方 skill 前必须先重新设计注入边界（设计文档 §13）。
+            # 按配置顺序全量静态注入；
             # 未启用时不追加任何区块，保持 instructions 与既有格式逐字节一致。
             skill_lines = ["<skills>"]
             for skill_name in self.config.skills:
