@@ -76,7 +76,7 @@ Skill 和知识库反而**加剧**这个问题（注入更多指令与检索内�
 | Step 0 | 本文 | 差距分析与总索引 | 已完成 |
 | Step 1a | [01-context-management-design.md](01-context-management-design.md) | 上下文字符预算与配对安全裁剪 | 已实现（本文档版） |
 | Step 1b | （届期再写） | 超限时模型摘要压缩（compact），替代纯丢弃 | 后置，可选 |
-| Step 2 | [02-skill-system-design.md](02-skill-system-design.md) | Skill 系统：markdown 指令包 + 配置显式启用 | 设计已评审，待实现 |
+| Step 2 | [02-skill-system-design.md](02-skill-system-design.md) | Skill 系统：markdown 指令包 + 配置显式启用 | 已实现（本文档版） |
 | Step 3a | （届期再写） | 知识库摄取：本地文档 → 切块 → embedding → 本地索引 | 待实现 |
 | Step 3b | （届期再写） | `search_knowledge` 扩展工具：检索注入工具循环 | 待实现 |
 | Step 4+ | 不设文档 | 流式输出 / 长期记忆 / 沙箱 / 前端 / 可观测性 | 届期逐项评估 |

@@ -351,6 +351,7 @@ AgentGraph/
 ├─ tool_system/                  # 工具契约、冻结注册表和内置工具目录
 │  └─ builtin_tools/             # `send`、`close` 与 BUILTIN_TOOLS
 ├─ ToolExtension/                # 受信任外部工具的显式 EXTENSION_TOOLS 目录
+├─ skills/                      # skill markdown 指令包目录（注册不等于启用）
 │  ├─ text_stats.py              # 教学：严格文本统计工具
 │  ├─ agent_info.py              # 教学：最小 Agent 公开身份工具
 │  └─ get_weather.py             # 教学：Open-Meteo 异步资源生命周期工具
@@ -410,6 +411,7 @@ AgentGraph/
 | `model`                       | string  | 普通 Agent 是 | `null`      | Responses API 模型名                        |
 | `agents`                      | array   | 否            | `[]`        | 当前节点允许访问的直接邻居                  |
 | `tools`                       | object  | 否            | `{}`        | 普通 Agent 的外部工具选择；省略时不启用扩展 |
+| `skills`                      | array   | 否            | `[]`        | 启用的 skill 名列表，最多 8 个；名字必须存在于 `skills/` 目录，默认不启用（见下文 Skill 系统） |
 | `ssl_certfile`                | path    | 否            | `null`      | 当前 Uvicorn HTTPS 证书                     |
 | `ssl_keyfile`                 | path    | 否            | `null`      | 当前 Uvicorn HTTPS 私钥，必须与证书成对     |
 | `http_timeout_seconds`        | number  | 否            | `60`        | Agent 间 HTTP 超时                          |
@@ -449,6 +451,23 @@ AgentGraph/
 - 名称列表只启用指定工具，例如 `{"extensions": ["text_stats", "agent_info", "get_weather"]}`；名称区分大小写、不得重复，且必须在 `EXTENSION_TOOLS` 中存在；注册到目录不等于启用；
 - `root` 只允许省略、`[]` 或 `"none"`，不会导入扩展目录，也不会向模型暴露工具；
 - 内置 `send`、`close` 不需要写入配置；它们由 `BUILTIN_TOOLS` 按固定顺序提供，并在当前 Agent 没有直接邻居时一起隐藏。
+
+### Skill 系统
+
+Skill 是 `skills/` 目录下的 markdown 指令包：头部两行 `key: value`（`name` 必须与文件名一致、`description` 供运维查看），空行后全为正文（上限 2000 字符，空行后的 `key:` 样式行不再解析）。普通 Agent 通过配置显式启用：
+
+```json
+{
+  "skills": ["research"]
+}
+```
+
+- 省略或 `[]` 不启用，instructions 与未实现 skill 前逐字节一致；
+- 启用列表最多 8 项、不得重复，名字必须在目录加载结果中存在，否则启动即 `ConfigError`；
+- Agent 构造时一次性加载并冻结（与 `ToolRegistry` 同款生命周期），不热加载；重启生效；
+- 启用的 skill 正文按配置顺序以 `<skills>` 区块追加到 instructions 末尾；skill 是本地运维者编写的可信内容，不适用 `peer_metadata` 的不可信声明；
+- 目录缺失或为空均视为空映射，不影响既有部署；`root` 无模型无 instructions，不允许配置 skill；
+- 新增 skill：在 `skills/` 放入合法 `.md` 文件即可注册，配置引用才启用；注册不等于启用。
 
 ### 环境变量展开
 

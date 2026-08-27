@@ -30,6 +30,14 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 _ENV_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
+# skill 名同时也是文件名 stem；与 Agent id 同款字符集但要求字母开头，
+# 防止纯数字等易混淆名字进入配置引用。
+_SKILL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+# 单个 skill 正文的字符上限；与 introduction 上限一致，8 个 skill 封顶约 16K
+# 字符，覆盖 instructions 不计入 max_context_chars 预算的盲区。
+_SKILL_MAX_BODY_CHARS = 2000
+
 
 class ConfigError(Exception):
     """表示配置文件读取、解析、变量展开或模型校验失败。
@@ -118,6 +126,8 @@ class AgentConfig(BaseModel):
         model: 普通 Agent 使用的非空模型名称。
         agents: 当前 Agent 可以访问的对等节点列表。
         tools: 扩展工具三态选择；省略时等价于空列表。
+        skills: 启用的 skill 名列表；名字必须在启动时 skills 目录加载结果中
+            存在，最多 8 个，默认空列表即不启用。
         ssl_certfile: 可选的服务端 TLS 证书文件。
         ssl_keyfile: 可选的服务端 TLS 私钥文件，必须与证书同时提供。
         http_timeout_seconds: Agent 间 HTTP 调用超时秒数，必须为正数。
@@ -150,6 +160,7 @@ class AgentConfig(BaseModel):
     model: str | None = None
     agents: list[PeerConfig] = Field(default_factory=list)
     tools: ToolSelectionConfig = Field(default_factory=ToolSelectionConfig)
+    skills: list[str] = Field(default_factory=list, max_length=8)
     ssl_certfile: Path | None = None
     ssl_keyfile: Path | None = None
     http_timeout_seconds: float = Field(default=60.0, gt=0)
@@ -166,6 +177,13 @@ class AgentConfig(BaseModel):
     def _validate_introduction(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("introduction 不能为空")
+        return value
+
+    @field_validator("skills")
+    @classmethod
+    def _validate_skill_names(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("skills 不能包含重复的 skill 名")
         return value
 
     @field_validator("key", "openai_key")
@@ -190,6 +208,8 @@ class AgentConfig(BaseModel):
         )
         if self.id == "root" and extensions_enabled:
             raise ValueError("root 不允许启用扩展工具")
+        if self.id == "root" and self.skills:
+            raise ValueError("root 不允许启用 skill")
 
         if self.id != "root":
             required_values = (
@@ -291,6 +311,121 @@ def load_agent_config(path: str | Path) -> AgentConfig:
         validation_error_message = _safe_validation_message(error)
     # ValidationError 的 input_value 可能是含明文 secret 的完整配置，必须在异常块外抛出。
     raise ConfigError(f"配置校验失败: {validation_error_message}") from None
+
+
+@dataclass(frozen=True)
+class SkillSpec:
+    """描述一个已解析的 skill 指令包。
+
+    参数:
+        name: 与文件名 stem 一致的稳定 skill 名。
+        description: 供运维者查看的清单说明，不注入模型。
+        body: 注入 instructions 的完整指令正文。
+
+    返回值:
+        构造后得到不可变的 skill 记录。
+
+    异常:
+        构造阶段不抛异常。
+
+    状态变化:
+        无；frozen 实例创建后不可修改。
+    """
+
+    name: str
+    description: str
+    body: str
+
+
+def parse_skill_file(path: Path) -> SkillSpec:
+    """解析单个 skill markdown 文件为严格校验的 ``SkillSpec``。
+
+    文件格式：前几行 ``key: value`` 头（仅接受 name 与 description），
+    之后一个空行，空行后全部为正文，不再解析任何键。
+
+    参数:
+        path: skill 文件路径；文件名去 ``.md`` 后必须满足
+            ``^[A-Za-z][A-Za-z0-9_-]*$``。
+
+    返回值:
+        携带 name、description 与正文的 ``SkillSpec``。
+
+    异常:
+        ConfigError: 文件名非法、不可读、非 UTF-8、头部行不是 ``key: value``
+            格式、包含未知键、缺少必填键、name 与文件名不一致或正文超过
+            2000 字符时抛出。错误只报告文件名与原因，不回显文件内容。
+
+    状态变化:
+        只读取文件，不修改文件系统。
+    """
+
+    stem = path.stem
+    if _SKILL_NAME.fullmatch(stem) is None:
+        raise ConfigError(f"skill 文件名非法: {path.name}")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise ConfigError(f"skill 文件不可读: {path.name}") from None
+
+    lines = text.split("\n")
+    header: dict[str, str] = {}
+    body_start = len(lines)
+    for index, line in enumerate(lines):
+        if not line.strip():
+            body_start = index + 1
+            break
+        key, separator, value = line.partition(":")
+        if not separator or not key.strip():
+            raise ConfigError(f"skill 头部行必须是 key: value 格式: {path.name}")
+        key = key.strip()
+        if key not in {"name", "description"}:
+            raise ConfigError(f"skill 头部包含未知键: {path.name}")
+        value = value.strip()
+        if not value:
+            raise ConfigError(f"skill 头部键 {key} 的值不能为空: {path.name}")
+        header[key] = value
+
+    if "name" not in header:
+        raise ConfigError(f"skill 缺少必填键 name: {path.name}")
+    if header["name"] != stem:
+        raise ConfigError(f"skill name 与文件名不一致: {path.name}")
+    if "description" not in header:
+        raise ConfigError(f"skill 缺少必填键 description: {path.name}")
+
+    body = "\n".join(lines[body_start:])
+    if len(body) > _SKILL_MAX_BODY_CHARS:
+        raise ConfigError(
+            f"skill 正文超过 {_SKILL_MAX_BODY_CHARS} 字符: {path.name}"
+        )
+    return SkillSpec(name=header["name"], description=header["description"], body=body)
+
+
+def load_skills(directory: Path) -> dict[str, SkillSpec]:
+    """加载目录下全部 ``*.md`` 为 skill 映射。
+
+    参数:
+        directory: skill 目录；不存在时返回空映射（未配置 skill 的既有部署
+            零影响），不递归子目录，忽略非 ``.md`` 文件。
+
+    返回值:
+        以 skill 名为键、按文件名排序确定性加载的 ``SkillSpec`` 映射。平铺
+        目录内文件名 stem 唯一，因此键不会重复。
+
+    异常:
+        ConfigError: 任一文件解析失败时抛出；任一文件失败即整体失败。
+
+    状态变化:
+        只读取目录与文件，不修改文件系统。
+    """
+
+    if not directory.is_dir():
+        return {}
+    skills: dict[str, SkillSpec] = {}
+    for path in sorted(directory.glob("*.md")):
+        if path.is_file():
+            skill = parse_skill_file(path)
+            skills[skill.name] = skill
+    return skills
 
 
 @dataclass(frozen=True, slots=True)
