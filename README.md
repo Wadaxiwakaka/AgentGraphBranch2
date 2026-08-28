@@ -351,10 +351,13 @@ AgentGraph/
 ├─ tool_system/                  # 工具契约、冻结注册表和内置工具目录
 │  └─ builtin_tools/             # `send`、`close` 与 BUILTIN_TOOLS
 ├─ ToolExtension/                # 受信任外部工具的显式 EXTENSION_TOOLS 目录
-├─ skills/                      # skill markdown 指令包目录（注册不等于启用）
 │  ├─ text_stats.py              # 教学：严格文本统计工具
 │  ├─ agent_info.py              # 教学：最小 Agent 公开身份工具
 │  └─ get_weather.py             # 教学：Open-Meteo 异步资源生命周期工具
+├─ skills/                       # skill markdown 指令包目录（注册不等于启用）
+│  └─ research.md                # 示例：调研方法指令包
+├─ kb_ingest.py                  # 知识库摄取 CLI（md/txt/docx/pdf → JSON 索引）
+├─ knowledge/                    # 运行时数据：sources/ 源文档与 index.json（不入 Git）
 ├─ experiment_system/            # 独立 Attempt 控制面
 │  ├─ cli.py                     # 本地 create/status/control/recover CLI
 │  ├─ state.py                   # Attempt 状态与只读视图
@@ -376,6 +379,7 @@ AgentGraph/
 │  └─ Agent2.json
 ├─ docs/
 │  ├─ 中文入门教程.md
+│  ├─ plans/                    # 数据面能力补齐系列设计文档与差距分析
 │  └─ superpowers/               # 两份 architecture specs 与实现计划
 └─ tests/
    ├─ helpers.py
@@ -386,6 +390,11 @@ AgentGraph/
    ├─ test_user.py
    ├─ test_agent_entry.py
    ├─ test_example_extension_tools.py
+   ├─ test_skill_loading.py
+   ├─ test_kb_ingest.py
+   ├─ fixtures/
+   │  ├─ minimal.pdf             # 两行文本的最小 pdf 提取 fixture
+   │  └─ mixed.pdf               # 文本页+空白页的混合 fixture
    ├─ test_integration_chain.py
    ├─ test_experiment_cli.py
    ├─ test_experiment_store_contract.py
@@ -578,6 +587,31 @@ CLI 不接受 raw prompt 或 raw response 参数。每次 mutating convenience c
 错误输出使用固定消息，不回显参数、输入 JSON、Pydantic 详情、异常、URL、凭据或
 traceback。生产 CLI 当前装配 SQLite、ArtifactStore、SystemClock、UUID factory、
 Engine、Executor 和 RecoveryCoordinator，但 Backend registry 为空。
+
+### 知识库摄取 CLI
+
+`kb_ingest.py` 是独立的离线摄取入口：把 `knowledge/sources/` 下的
+`.md` / `.txt` / `.docx` / `.pdf` 切块、经 embeddings 端点向量化，原子写出
+`knowledge/index.json`。`knowledge/` 目录不入 Git。
+
+```powershell
+$env:OPENAI_API_KEY = '<可选；本地无鉴权端点可省略>'
+uv run python kb_ingest.py `
+  --base-url http://localhost:1234/v1 `
+  --embedding-model text-embedding-nomic-embed-text-v1.5
+```
+
+- `--base-url` 与 `--embedding-model` 必填、无默认值；`--sources`、`--index`、
+  `--chunk-chars` 可选（默认 `knowledge/sources`、`knowledge/index.json`、`800`）；
+- 索引是自描述的：embedding 模型名与维度记录在索引内，检索工具查询时复用；
+- 未知扩展名文件（含旧版 `.doc`）与零文本文件（如扫描版 PDF）点名失败；
+  混合型 pdf 的零文本页号记入摘要 `warnings`，不硬失败；
+- pdf 内图片一律跳过（无 OCR / 视觉模型）；`.docx` 提取仅用 stdlib
+  （zipfile + XML）；`.pdf` 依赖 `pypdf`；
+- CLI 本体没有 mock / 离线 / dry-run 模式；模拟端点只存在于测试代码。
+
+退出码：`0` 成功（stdout 一行摘要 JSON，含 `base_url`、`embedding_model`、
+文件数、块数、维度与 `warnings`），`2` 参数无效，`5` 摄取失败（固定脱敏消息）。
 
 ## HTTP API
 
@@ -932,6 +966,7 @@ root API 没有认证，默认安全边界是 `127.0.0.1`。
 | `tests/test_experiment_sqlite_store.py`   | SQLite WAL、重开、损坏检测与修复               |
 | `tests/test_experiment_recovery.py`       | 按 Action policy 恢复与不确定结果处理          |
 | `tests/test_experiment_crash_matrix.py`   | 六个持久化边界的 crash injection               |
+| `tests/test_kb_ingest.py`                 | 知识库摄取：提取、切块、警告、退出码与 mock 端点端到端 |
 | `tests/test_live_chain.py`                | 可选真实 Responses smoke                       |
 
 ### 默认测试

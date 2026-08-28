@@ -12,3 +12,4 @@ htmlcov/
 *.key
 chat_history/
 .superpowers/
+knowledge/
