@@ -3,6 +3,7 @@
   "introduction": "本地用户入口，负责把请求转给 Agent1。",
   "host": "127.0.0.1",
   "port": 9860,
+  "http_timeout_seconds": 300,
   "agents": [
     {
       "id": "Agent1",
