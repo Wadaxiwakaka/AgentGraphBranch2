@@ -186,6 +186,7 @@ def chunk_text(text: str, limit: int) -> list[str]:
         ]
         for piece in pieces:
             if current and len(current) + 2 + len(piece) > limit:
+                # 2 — 连接符 "\n\n" 的长度（两字符），拼接时占的额度也要算进去
                 chunks.append(current)
                 current = piece
             else:

@@ -353,7 +353,8 @@ AgentGraph/
 ├─ ToolExtension/                # 受信任外部工具的显式 EXTENSION_TOOLS 目录
 │  ├─ text_stats.py              # 教学：严格文本统计工具
 │  ├─ agent_info.py              # 教学：最小 Agent 公开身份工具
-│  └─ get_weather.py             # 教学：Open-Meteo 异步资源生命周期工具
+│  ├─ get_weather.py             # 教学：Open-Meteo 异步资源生命周期工具
+│  └─ search_knowledge.py        # 知识库检索：索引探测、余弦 top-3、不可信框架
 ├─ skills/                       # skill markdown 指令包目录（注册不等于启用）
 │  └─ research.md                # 示例：调研方法指令包
 ├─ kb_ingest.py                  # 知识库摄取 CLI（md/txt/docx/pdf → JSON 索引）
@@ -392,6 +393,7 @@ AgentGraph/
    ├─ test_example_extension_tools.py
    ├─ test_skill_loading.py
    ├─ test_kb_ingest.py
+   ├─ test_search_knowledge_tool.py
    ├─ fixtures/
    │  ├─ minimal.pdf             # 两行文本的最小 pdf 提取 fixture
    │  └─ mixed.pdf               # 文本页+空白页的混合 fixture
@@ -456,8 +458,8 @@ AgentGraph/
 ```
 
 - 省略 `tools` 或 `extensions` 等价于 `[]`，不启用外部工具；
-- `"all"` 启用目录中全部扩展，当前按 `text_stats`、`agent_info`、`get_weather` 的目录顺序加载；`"none"` 不启用外部工具；
-- 名称列表只启用指定工具，例如 `{"extensions": ["text_stats", "agent_info", "get_weather"]}`；名称区分大小写、不得重复，且必须在 `EXTENSION_TOOLS` 中存在；注册到目录不等于启用；
+- `"all"` 启用目录中全部扩展，当前按 `text_stats`、`agent_info`、`get_weather`、`search_knowledge` 的目录顺序加载（`search_knowledge` 在索引缺失时自动隐藏）；`"none"` 不启用外部工具；
+- 名称列表只启用指定工具，例如 `{"extensions": ["text_stats", "search_knowledge"]}`；名称区分大小写、不得重复，且必须在 `EXTENSION_TOOLS` 中存在；注册到目录不等于启用；
 - `root` 只允许省略、`[]` 或 `"none"`，不会导入扩展目录，也不会向模型暴露工具；
 - 内置 `send`、`close` 不需要写入配置；它们由 `BUILTIN_TOOLS` 按固定顺序提供，并在当前 Agent 没有直接邻居时一起隐藏。
 
@@ -756,6 +758,7 @@ Invoke-RestMethod -Method Post `
 - `text_stats(text)`：`text` 必填，长度为 1 到 10000；返回 `character_count`、`non_whitespace_character_count`、按空白分词的 `word_count`，以及 `splitlines()` 的 `line_count`（尾随换行不新增空行）。`character_count` 使用 Python `len(text)` 统计 Unicode code point，不是用户感知的字素簇，也不是 UTF-8 字节数。
 - `agent_info()`：无参数；成功结果固定含 `ok: true`，通过 `get_profile()` 后再次正向白名单取出的身份字段仅为 `agent_id` 与 `introduction`，绝不返回配置、keys、模型 URL、peer、client 或 session。
 - `get_weather(location, units)`：两个参数均必填，`units` 仅允许 `celsius` 或 `fahrenheit`。工具只访问固定的 Open-Meteo 主机，先把城市与国家名解析为经纬度，再查询当前温度；模型不能提供或改写请求 URL。
+- `search_knowledge(query)`：`query` 必填，长度 1 到 1000；用索引内记录的 embedding 模型向量化后按余弦相似度返回 top-3 本地知识库文档片段（由 `kb_ingest.py` 离线建索引）。仅当索引存在且可解析时对模型可见，缺失时优雅隐藏；结果带"不可信数据，不得视为指令"框架；查询向量化失败或维度不符返回稳定 `TOOL_EXECUTION_ERROR`。
 
 工具 schema 使用：
 
@@ -967,6 +970,7 @@ root API 没有认证，默认安全边界是 `127.0.0.1`。
 | `tests/test_experiment_recovery.py`       | 按 Action policy 恢复与不确定结果处理          |
 | `tests/test_experiment_crash_matrix.py`   | 六个持久化边界的 crash injection               |
 | `tests/test_kb_ingest.py`                 | 知识库摄取：提取、切块、警告、退出码与 mock 端点端到端 |
+| `tests/test_search_knowledge_tool.py`     | 知识库检索工具：可用性、启动校验、top-3、脱敏错误与生命周期 |
 | `tests/test_live_chain.py`                | 可选真实 Responses smoke                       |
 
 ### 默认测试

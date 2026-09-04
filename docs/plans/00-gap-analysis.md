@@ -78,7 +78,7 @@ Skill 和知识库反而**加剧**这个问题（注入更多指令与检索内�
 | Step 1b | （届期再写） | 超限时模型摘要压缩（compact），替代纯丢弃 | 后置，可选 |
 | Step 2 | [02-skill-system-design.md](02-skill-system-design.md) | Skill 系统：markdown 指令包 + 配置显式启用 | 已实现（本文档版） |
 | Step 3a | [03-knowledge-base-design.md](03-knowledge-base-design.md) §6、§13 | 知识库摄取 CLI：本地文档 → 切块 → embedding → 本地索引 | 已实现 |
-| Step 3b | [03-knowledge-base-design.md](03-knowledge-base-design.md) §7 | `search_knowledge` 扩展工具：检索注入工具循环 | 设计待评审 |
+| Step 3b | [03-knowledge-base-design.md](03-knowledge-base-design.md) §7、§14 | `search_knowledge` 扩展工具：检索注入工具循环 | 已实现 |
 | Step 4+ | 不设文档 | 流式输出 / 长期记忆 / 沙箱 / 前端 / 可观测性 | 届期逐项评估 |
 
 设计取舍总原则（贯穿所有步骤）：

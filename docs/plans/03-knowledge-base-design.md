@@ -332,3 +332,24 @@ live 测试的联调参数以此为准；
   3. 损坏 docx（BadZip / 缺 entry / XML 解析失败）提取为空串，统一走
      "零文本文件点名失败"路径，与设计一致。
 - 3b（检索工具）待实现，本提交不含 `search_knowledge`。
+
+## 14. 验收记录（3b）
+
+- 日期：2026-08-05；分支 `feature/kb-ingest`（与 3a 同分支，第二个提交）。
+- 新增 `ToolExtension/search_knowledge.py`（约 290 行含中文 docstring）与
+  `tests/test_search_knowledge_tool.py`（17 项测试，覆盖 §10 第 6-12 项）；
+  `AgentRemote` 新增 `knowledge_index_path` 参数（默认
+  `knowledge/index.json`，镜像 `skills_directory` 模式）；`core.py` 零改动。
+- 既有测试改动仅一处：`test_example_extension_tools.py` 的目录顺序断言从
+  三项扩为四项（追加在末尾，顺序不变）。
+- 验证：目标测试 117 passed；全量离线 `1225 passed, 1 deselected`，唯一失败
+  仍为 `test_integration_chain` 基线预存项；`compileall` 通过。
+- 真实联调（本机 :1234 + nomic-embed-v1.5，真索引真查询）：链路、
+  自描述模型名复用、top-3、生命周期全部工作；**发现模型质量问题**：
+  `text-embedding-nomic-embed-text-v1.5` 对短中文文本区分度弱（四段相关
+  得分挤在 0.57-0.66，"会话隔离"查询误排"拓扑发现"段首位；用独立脚本
+  绕过工具直算原始余弦复现，排除代码 bug）。中文语料建议换 bge-m3 /
+  bge-small-zh 等中文向模型，索引自描述使换模型零代码改动，仅重建索引。
+- 偏差记录：无。`is_available` 对未声明 `knowledge_index_path` 的 agent
+  （如既有测试的 `_FakeAgent`）返回 False，保证既有目录/`"all"` 测试
+  行为确定性，与设计 §7.2 一致。

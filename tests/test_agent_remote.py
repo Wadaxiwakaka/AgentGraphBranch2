@@ -3414,3 +3414,30 @@ def test_agent_remote_rejects_unknown_skill_name(tmp_path: Path) -> None:
             skills_directory=_make_skills_directory(tmp_path),
         )
     assert "ghost" in str(excinfo.value)
+
+
+def test_agent_remote_knowledge_index_path_injection(tmp_path: Path) -> None:
+    """knowledge_index_path 参数可注入且默认为 knowledge/index.json。"""
+
+    agent_remote_class = _load_agent_remote_class()
+    injected = tmp_path / "kb-index.json"
+    remote = agent_remote_class(
+        make_agent_config(),
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(500))
+        ),
+        openai_client=_InjectedOpenAIClient(),
+        storage_root=tmp_path / "history",
+        knowledge_index_path=injected,
+    )
+    assert remote.knowledge_index_path == injected
+
+    default_remote = agent_remote_class(
+        make_agent_config(),
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(500))
+        ),
+        openai_client=_InjectedOpenAIClient(),
+        storage_root=tmp_path / "history",
+    )
+    assert default_remote.knowledge_index_path == Path("knowledge/index.json")

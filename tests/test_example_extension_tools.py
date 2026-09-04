@@ -11,6 +11,7 @@ import ToolExtension.get_weather as get_weather_module
 from ToolExtension import EXTENSION_TOOLS
 from ToolExtension.agent_info import AgentInfoTool
 from ToolExtension.get_weather import GetWeatherArguments, GetWeatherTool
+from ToolExtension.search_knowledge import SearchKnowledgeTool
 from ToolExtension.text_stats import TextStatsTool
 from tool_system.contract import AgentTool, ToolStateError
 from tool_system.registry import ToolRegistry
@@ -125,7 +126,12 @@ def _mock_weather_clients(
 
 
 def test_extension_catalog_has_the_three_examples_in_stable_order() -> None:
-    assert EXTENSION_TOOLS == (TextStatsTool, AgentInfoTool, GetWeatherTool)
+    assert EXTENSION_TOOLS == (
+        TextStatsTool,
+        AgentInfoTool,
+        GetWeatherTool,
+        SearchKnowledgeTool,
+    )
 
 
 def test_extension_selection_supports_none_empty_list_catalog_order_and_all() -> None:

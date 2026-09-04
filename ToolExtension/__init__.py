@@ -17,12 +17,14 @@ from tool_system.contract import AgentTool
 
 from .agent_info import AgentInfoTool
 from .get_weather import GetWeatherTool
+from .search_knowledge import SearchKnowledgeTool
 from .text_stats import TextStatsTool
 
 EXTENSION_TOOLS: tuple[type[AgentTool], ...] = (
     TextStatsTool,
     AgentInfoTool,
     GetWeatherTool,
+    SearchKnowledgeTool,
 )
 
 __all__ = ["EXTENSION_TOOLS"]

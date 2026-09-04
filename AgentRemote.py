@@ -154,6 +154,7 @@ class AgentRemote:
         storage_root: Path = Path("chat_history"),
         extension_tool_classes: tuple[type[AgentTool], ...] = (),
         skills_directory: Path = Path("skills"),
+        knowledge_index_path: Path = Path("knowledge/index.json"),
     ) -> None:
         """保存普通 Agent 配置并初始化公开兼容状态。
 
@@ -164,6 +165,8 @@ class AgentRemote:
             storage_root: 会话归档目录。
             extension_tool_classes: 已导入的扩展工具类元组。
             skills_directory: skill 目录；目录缺失视为空映射。
+            knowledge_index_path: 知识库索引路径；存在且合法时
+                ``search_knowledge`` 工具对模型可见，缺失时优雅隐藏。
 
         返回值:
             ``None``。
@@ -221,6 +224,8 @@ class AgentRemote:
             extension_tool_classes=extension_tool_classes,
             enabled_extensions=config.tools.extensions,
         )
+        # 知识库索引路径供 search_knowledge 工具在注册表构建期探测。
+        self.knowledge_index_path = Path(knowledge_index_path)
         # skill 与工具注册表同款生命周期：构造时加载冻结，之后不再读文件系统。
         self._skills: dict[str, SkillSpec] = load_skills(Path(skills_directory))
         for skill_name in config.skills:
