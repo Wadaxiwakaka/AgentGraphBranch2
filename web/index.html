@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentGraph · root</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='4' cy='8' r='3' fill='%23d9a353'/><circle cx='12' cy='4' r='2' fill='%23625b4f'/><circle cx='12' cy='12' r='2' fill='%23625b4f'/><path d='M6.5 7 10.3 4.9M6.5 9 10.3 11.1' stroke='%23625b4f' stroke-width='1'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="mark"></span>AgentGraph
+    <span class="brand-node mono">root@<span id="hostLabel"></span></span>
+  </div>
+  <div class="header-actions">
+    <span class="conn">
+      <span class="conn-dot" id="connDot"></span>
+      <span class="mono" id="connText">连接中</span>
+    </span>
+    <button class="btn ghost" id="refreshBtn" title="重新发现拓扑与 Agent 状态">刷新拓扑</button>
+    <button class="btn ghost" id="topoToggle" aria-pressed="true">隐藏拓扑</button>
+  </div>
+</header>
+
+<main id="layout">
+  <aside id="sidebar">
+    <div class="panel-head mono">AGENTS <span id="agentCount" class="dim"></span></div>
+    <div id="agentList"><div class="empty-mini mono">加载拓扑中…</div></div>
+  </aside>
+
+  <section id="chat">
+    <div id="chatHead" class="hidden">
+      <div class="chat-title">
+        <span id="chatAgentId" class="mono"></span>
+        <span id="chatIntro" class="dim"></span>
+      </div>
+      <button class="btn ghost danger" id="closeChatBtn" title="关闭并归档当前会话">关闭会话</button>
+    </div>
+    <div id="messages"></div>
+    <div id="composer" class="hidden">
+      <textarea id="input" rows="1" maxlength="65536"
+        placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+      <button class="btn primary" id="sendBtn">发送</button>
+    </div>
+  </section>
+
+  <aside id="topoPanel">
+    <div class="panel-head mono">TOPOLOGY <span class="dim">点击直接节点可切换会话</span></div>
+    <div id="topoScroll"><svg id="topoSvg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <div id="topoErrors"></div>
+  </aside>
+</main>
+
+<div id="toast" class="mono"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

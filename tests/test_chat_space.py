@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -262,6 +263,190 @@ def test_save_uses_same_directory_os_replace_on_success(
     assert destination_path == saved_path
     assert not temporary_path.exists()
     assert json.loads(saved_path.read_text(encoding="utf-8"))["schema_version"] == 1
+
+
+def _item_char_size(item: dict[str, object]) -> int:
+    return len(json.dumps(item, ensure_ascii=False))
+
+
+def _context_char_total(items: list[dict[str, object]]) -> int:
+    return sum(_item_char_size(item) for item in items)
+
+
+def _assert_function_call_pairing(items: list[dict[str, object]]) -> None:
+    calls = [
+        item["call_id"]
+        for item in items
+        if item.get("type") == "function_call"
+    ]
+    outputs = [
+        item["call_id"]
+        for item in items
+        if item.get("type") == "function_call_output"
+    ]
+    assert sorted(calls) == sorted(outputs)
+    assert len(set(calls)) == len(calls)
+
+
+def _make_paired_context(chat: core.ChatSpace) -> list[dict[str, object]]:
+    """构造 user / reasoning / call-output 被消息间隔的完整上下文。"""
+
+    chat.add_msg("用户问题", "user")
+    chat.context_items.append(
+        {"type": "reasoning", "id": "rs_1", "summary": "需要调用工具"}
+    )
+    chat.context_items.append(
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "send",
+            "arguments": '{"msg":"问题","to_id":"peer"}',
+        }
+    )
+    # 经过 append_response_items 写入，才能同时维护可读视图。
+    chat.append_response_items(
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": "中间说明",
+        }
+    )
+    chat.append_tool_output("call_1", {"ok": True})
+    return deepcopy(chat.context_items)
+
+
+def test_trim_context_without_budget_keeps_items_unchanged(tmp_path: Path) -> None:
+    chat = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    original = _make_paired_context(chat)
+
+    removed = chat.trim_context(None)
+
+    assert removed == 0
+    assert chat.context_items == original
+
+
+def test_trim_context_under_budget_returns_zero_without_reordering(
+    tmp_path: Path,
+) -> None:
+    chat = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    original = _make_paired_context(chat)
+    budget = _context_char_total(chat.context_items) + 1
+
+    removed = chat.trim_context(budget)
+
+    assert removed == 0
+    assert chat.context_items == original
+
+
+def test_trim_context_drops_oldest_message_first(tmp_path: Path) -> None:
+    chat = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    original = _make_paired_context(chat)
+    unit_sizes = [
+        _item_char_size(original[0]),
+        _item_char_size(original[1]),
+        _item_char_size(original[2]) + _item_char_size(original[4]),
+        _item_char_size(original[3]),
+    ]
+    budget = sum(unit_sizes[1:]) + 1
+
+    removed = chat.trim_context(budget)
+
+    assert removed == 1
+    assert chat.context_items == original[1:]
+    _assert_function_call_pairing(chat.context_items)
+
+
+def test_trim_context_keeps_call_and_output_as_one_unit(tmp_path: Path) -> None:
+    chat = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    original = _make_paired_context(chat)
+    # 预算只够 [call 配对单元] + [最新 assistant 消息]：必须先丢 user 和 reasoning。
+    budget = (
+        _item_char_size(original[2])
+        + _item_char_size(original[4])
+        + _item_char_size(original[3])
+        + 1
+    )
+
+    removed = chat.trim_context(budget)
+
+    assert removed == 2
+    assert chat.context_items == original[2:]
+    _assert_function_call_pairing(chat.context_items)
+
+
+def test_trim_context_drops_call_pair_together_when_overrun(tmp_path: Path) -> None:
+    chat = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    original = _make_paired_context(chat)
+    # 预算只够最新的 assistant 消息：call 与 output 必须一起消失，不能留下孤儿。
+    budget = _item_char_size(original[3]) + 1
+
+    removed = chat.trim_context(budget)
+
+    assert removed == 3
+    assert chat.context_items == [original[3]]
+    _assert_function_call_pairing(chat.context_items)
+
+
+def test_trim_context_never_empties_context(tmp_path: Path) -> None:
+    single = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    single.add_msg("超长用户消息" * 50, "user")
+    original = deepcopy(single.context_items)
+
+    assert single.trim_context(10) == 0
+    assert single.context_items == original
+
+    multi = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    multi.add_msg("第一条", "user")
+    multi.add_msg("第二条", "user")
+    multi.add_msg("第三条", "user")
+
+    removed = multi.trim_context(1)
+
+    assert removed == 2
+    assert multi.context_items == [
+        {"type": "message", "role": "user", "content": "第三条"}
+    ]
+
+
+def test_trim_context_keeps_readable_view_instructions_and_tools(
+    tmp_path: Path,
+) -> None:
+    tools = [{"type": "function", "name": "lookup"}]
+    chat = core.ChatSpace(
+        owner_id="owner",
+        peer_id="peer",
+        instructions="保持简洁。",
+        tools=tools,
+        storage_root=tmp_path,
+    )
+    _make_paired_context(chat)
+    budget = _context_char_total(chat.context_items)
+
+    removed = chat.trim_context(budget - 1)
+
+    assert removed == 1
+    assert chat.instructions == "保持简洁。"
+    assert chat.tools == tools
+    assert chat.messages == [
+        {"role": "user", "content": "用户问题"},
+        {"role": "assistant", "content": "中间说明"},
+    ]
+
+
+def test_trim_context_result_is_persisted_by_save(tmp_path: Path) -> None:
+    chat = core.ChatSpace(owner_id="owner", peer_id="peer", storage_root=tmp_path)
+    original = _make_paired_context(chat)
+    budget = _item_char_size(original[3]) + 1
+
+    chat.trim_context(budget)
+    saved_path = chat.save()
+
+    payload = json.loads(saved_path.read_text(encoding="utf-8"))
+    assert payload["context_items"] == chat.context_items == [original[3]]
+    assert payload["messages"] == [
+        {"role": "user", "content": "用户问题"},
+        {"role": "assistant", "content": "中间说明"},
+    ]
 
 
 def test_clear_only_empties_conversation_content(tmp_path: Path) -> None:

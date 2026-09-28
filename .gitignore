@@ -12,3 +12,5 @@ htmlcov/
 *.key
 chat_history/
 .superpowers/
+knowledge/
+agent_logs/

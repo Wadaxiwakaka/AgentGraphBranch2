@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from AgentRemote import AgentRemote
 from User import User
 from core import AgentConfig, AgentGraphError, ConfigError, load_agent_config
+from supervisor import AgentSupervisor
 
 
 class Agent:
@@ -57,7 +58,12 @@ class Agent:
         self.config = load_agent_config(config_path)
         self.runtime: User | AgentRemote
         if self.config.id == "root":
-            self.runtime = User(self.config)
+            self.runtime = User(
+                self.config,
+                supervisor=AgentSupervisor(
+                    Path(config_path).resolve().parent,
+                ),
+            )
         else:
             extension_import_failed = False
             try:

@@ -244,6 +244,27 @@ def test_agent_config_requires_positive_limits_and_timeouts(field_name: str) -> 
         core.AgentConfig(**data)
 
 
+def test_agent_config_max_context_chars_defaults_to_none_and_accepts_positive(
+) -> None:
+    data = _valid_agent_data()
+
+    assert core.AgentConfig(**data).max_context_chars is None
+
+    data["max_context_chars"] = 4096
+    assert core.AgentConfig(**data).max_context_chars == 4096
+
+
+@pytest.mark.parametrize("bad_value", [0, -1])
+def test_agent_config_rejects_non_positive_max_context_chars(
+    bad_value: int,
+) -> None:
+    data = _valid_agent_data()
+    data["max_context_chars"] = bad_value
+
+    with pytest.raises(ValidationError):
+        core.AgentConfig(**data)
+
+
 @pytest.mark.parametrize("bad_port", [0, 65536])
 def test_agent_config_rejects_ports_outside_tcp_range(bad_port: int) -> None:
     data = _valid_agent_data()
@@ -525,3 +546,52 @@ def test_agent_graph_error_exposes_transport_metadata() -> None:
     assert error.status_code == 503
     assert error.details == {"peer_id": "peer"}
     assert error.retry_after_seconds == 1.5
+
+
+def test_agent_config_defaults_to_no_skills() -> None:
+    """省略 skills 时默认空列表，行为与实现前零差异。"""
+
+    config = core.AgentConfig(**_valid_agent_data())
+    assert config.skills == []
+
+
+def test_agent_config_rejects_duplicate_skill_names() -> None:
+    """skills 列表不得包含重复名字，与 extensions 去重语义一致。"""
+
+    data = _valid_agent_data()
+    data["skills"] = ["research", "research"]
+    with pytest.raises(ValidationError):
+        core.AgentConfig(**data)
+
+
+def test_agent_config_rejects_more_than_eight_skills() -> None:
+    """启用数量上限 8：封住 instructions 不计入上下文预算的盲区。"""
+
+    data = _valid_agent_data()
+    data["skills"] = [f"skill_{index}" for index in range(9)]
+    with pytest.raises(ValidationError):
+        core.AgentConfig(**data)
+
+
+def test_root_agent_rejects_enabled_skills() -> None:
+    """root 无模型无 instructions，不允许启用 skill。"""
+
+    with pytest.raises(ValidationError):
+        core.AgentConfig(
+            id="root",
+            introduction="根节点",
+            port=8000,
+            skills=["research"],
+        )
+
+
+def test_root_agent_accepts_explicitly_empty_skills() -> None:
+    """root 显式传空 skills 与省略等价，不影响既有配置。"""
+
+    config = core.AgentConfig(
+        id="root",
+        introduction="根节点",
+        port=8000,
+        skills=[],
+    )
+    assert config.skills == []

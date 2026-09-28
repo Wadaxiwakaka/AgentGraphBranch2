@@ -56,7 +56,8 @@ AgentGraphInternet 是一个使用 Python、FastAPI、HTTPX 和 OpenAI Responses
 | root CLI                     | 已完成 | talk、topology、history、close、quit                                                         |
 | 确定性端到端测试             | 已完成 | root→Agent1→Agent2 的真实 ASGI/HTTP 链路                                                   |
 | 真实模型 smoke               | 可选   | 仅在显式环境开关和本地 20128 服务存在时运行                                                  |
-| Web 前端                     | 未实现 | 已保留稳定 HTTP API                                                                          |
+| Web 前端                     | 已完成 | `web/` 静态页面由 root 以 `html=True` 挂载于根路径，聊天/历史/关闭/拓扑图同源调用 root API，无构建依赖 |
+| Web 进程管理                  | 已完成 | `supervisor.py` 从 root 配置目录枚举节点，网页可拉起/停止本机 Agent 子进程（仅回环，仅限本实例拉起的进程） |
 | Agent 数据面分布式运行与恢复 | 未实现 | 当前 Agent 会话和锁只在单进程内存中                                                          |
 | Attempt 状态内核控制面       | 已完成 | 独立`experiment_system` 包、SQLite WAL、artifact、outbox、暂停、外部输入和恢复             |
 | 本地 Attempt CLI             | 已完成 | create/status/pause/resume/cancel/submit-input/recover；不启动 live Backend                  |
@@ -327,6 +328,9 @@ uv run python Agent.py --config agents_setting/root.json --interactive
 
 ### 4. 发起对话
 
+root 同时在 `http://127.0.0.1:9860/` 提供网页前端：左侧选择直接可见的 Agent 开始聊天，右侧查看拓扑图；功能与 CLI 等价，另有会话内 pending 计时与拓扑局部错误展示。无前端构建步骤，`web/` 目录由 root 自动挂载。
+
+网页还可以直接拉起 Agent 子进程：只需要先启动 root（所在终端需已设置 `OPENAI_API_KEY`，子进程继承该环境），打开页面后在左侧点「启动」，Agent1/Agent2 会以后台子进程方式运行，输出写入 `agent_logs/<id>.log`；root 退出时会终止自己拉起的全部子进程。也可以继续按原方式手动开窗口启动：
 ```text
 /talk Agent1 请询问Agent2在干嘛
 ```
@@ -345,6 +349,9 @@ uv run python Agent.py --config agents_setting/root.json --interactive
 ```text
 AgentGraph/
 ├─ Agent.py                      # 统一配置入口、Uvicorn 和 root CLI
+├─ supervisor.py                 # root 的本地 Agent 子进程监督者
+├─ web/                          # root 挂载的零依赖静态前端（index/app/style）
+├─ agent_logs/                   # 网页拉起的子进程输出日志（不入 Git）
 ├─ AgentRemote.py                # 普通 Agent、工具循环、并发、拓扑
 ├─ User.py                       # root 网关、会话管理和 root API
 ├─ core.py                       # 配置、schema、错误和 ChatSpace
@@ -353,7 +360,12 @@ AgentGraph/
 ├─ ToolExtension/                # 受信任外部工具的显式 EXTENSION_TOOLS 目录
 │  ├─ text_stats.py              # 教学：严格文本统计工具
 │  ├─ agent_info.py              # 教学：最小 Agent 公开身份工具
-│  └─ get_weather.py             # 教学：Open-Meteo 异步资源生命周期工具
+│  ├─ get_weather.py             # 教学：Open-Meteo 异步资源生命周期工具
+│  └─ search_knowledge.py        # 知识库检索：索引探测、余弦 top-3、不可信框架
+├─ skills/                       # skill markdown 指令包目录（注册不等于启用）
+│  └─ research.md                # 示例：调研方法指令包
+├─ kb_ingest.py                  # 知识库摄取 CLI（md/txt/docx/pdf → JSON 索引）
+├─ knowledge/                    # 运行时数据：sources/ 源文档与 index.json（不入 Git）
 ├─ experiment_system/            # 独立 Attempt 控制面
 │  ├─ cli.py                     # 本地 create/status/control/recover CLI
 │  ├─ state.py                   # Attempt 状态与只读视图
@@ -375,6 +387,7 @@ AgentGraph/
 │  └─ Agent2.json
 ├─ docs/
 │  ├─ 中文入门教程.md
+│  ├─ plans/                    # 数据面能力补齐系列设计文档与差距分析
 │  └─ superpowers/               # 两份 architecture specs 与实现计划
 └─ tests/
    ├─ helpers.py
@@ -385,6 +398,12 @@ AgentGraph/
    ├─ test_user.py
    ├─ test_agent_entry.py
    ├─ test_example_extension_tools.py
+   ├─ test_skill_loading.py
+   ├─ test_kb_ingest.py
+   ├─ test_search_knowledge_tool.py
+   ├─ fixtures/
+   │  ├─ minimal.pdf             # 两行文本的最小 pdf 提取 fixture
+   │  └─ mixed.pdf               # 文本页+空白页的混合 fixture
    ├─ test_integration_chain.py
    ├─ test_experiment_cli.py
    ├─ test_experiment_store_contract.py
@@ -410,6 +429,7 @@ AgentGraph/
 | `model`                       | string  | 普通 Agent 是 | `null`      | Responses API 模型名                        |
 | `agents`                      | array   | 否            | `[]`        | 当前节点允许访问的直接邻居                  |
 | `tools`                       | object  | 否            | `{}`        | 普通 Agent 的外部工具选择；省略时不启用扩展 |
+| `skills`                      | array   | 否            | `[]`        | 启用的 skill 名列表，最多 8 个；名字必须存在于 `skills/` 目录，默认不启用（见下文 Skill 系统） |
 | `ssl_certfile`                | path    | 否            | `null`      | 当前 Uvicorn HTTPS 证书                     |
 | `ssl_keyfile`                 | path    | 否            | `null`      | 当前 Uvicorn HTTPS 私钥，必须与证书成对     |
 | `http_timeout_seconds`        | number  | 否            | `60`        | Agent 间 HTTP 超时                          |
@@ -417,6 +437,7 @@ AgentGraph/
 | `include_encrypted_reasoning` | boolean | 否            | `true`      | 是否请求并回放加密 reasoning item           |
 | `max_tool_calls_per_turn`     | integer | 否            | `200`       | 单轮工具调用总上限                          |
 | `max_response_steps_per_turn` | integer | 否            | `256`       | 单轮 Responses 请求步数上限                 |
+| `max_context_chars`          | integer \| null | 否     | `null`      | 会话上下文字符预算（序列化字符数，非 token）；启用后从最旧单元裁剪，`function_call` 与其结果同进退，保留最新单元不清空 |
 | `topology_max_nodes`          | integer | 否            | `1000`      | 拓扑节点及不可信记录预算                    |
 | `topology_max_depth`          | integer | 否            | `64`        | 拓扑递归深度上限                            |
 
@@ -444,10 +465,27 @@ AgentGraph/
 ```
 
 - 省略 `tools` 或 `extensions` 等价于 `[]`，不启用外部工具；
-- `"all"` 启用目录中全部扩展，当前按 `text_stats`、`agent_info`、`get_weather` 的目录顺序加载；`"none"` 不启用外部工具；
-- 名称列表只启用指定工具，例如 `{"extensions": ["text_stats", "agent_info", "get_weather"]}`；名称区分大小写、不得重复，且必须在 `EXTENSION_TOOLS` 中存在；注册到目录不等于启用；
+- `"all"` 启用目录中全部扩展，当前按 `text_stats`、`agent_info`、`get_weather`、`search_knowledge` 的目录顺序加载（`search_knowledge` 在索引缺失时自动隐藏）；`"none"` 不启用外部工具；
+- 名称列表只启用指定工具，例如 `{"extensions": ["text_stats", "search_knowledge"]}`；名称区分大小写、不得重复，且必须在 `EXTENSION_TOOLS` 中存在；注册到目录不等于启用；
 - `root` 只允许省略、`[]` 或 `"none"`，不会导入扩展目录，也不会向模型暴露工具；
 - 内置 `send`、`close` 不需要写入配置；它们由 `BUILTIN_TOOLS` 按固定顺序提供，并在当前 Agent 没有直接邻居时一起隐藏。
+
+### Skill 系统
+
+Skill 是 `skills/` 目录下的 markdown 指令包：头部两行 `key: value`（`name` 必须与文件名一致、`description` 供运维查看），空行后全为正文（上限 2000 字符，空行后的 `key:` 样式行不再解析）。普通 Agent 通过配置显式启用：
+
+```json
+{
+  "skills": ["research"]
+}
+```
+
+- 省略或 `[]` 不启用，instructions 与未实现 skill 前逐字节一致；
+- 启用列表最多 8 项、不得重复，名字必须在目录加载结果中存在，否则启动即 `ConfigError`；
+- Agent 构造时一次性加载并冻结（与 `ToolRegistry` 同款生命周期），不热加载；重启生效；
+- 启用的 skill 正文按配置顺序以 `<skills>` 区块追加到 instructions 末尾。当前信任模型：`skills/` 目录的写入权与 `ToolExtension/`（任意 Python 代码）同级，同属本地运维者受信边界，因此不做 `peer_metadata` 式的不可信声明；**引入任何第三方 skill 之前必须先重新设计注入边界**（见 `docs/plans/02-skill-system-design.md` 第 13 节）；
+- 目录缺失或为空均视为空映射，不影响既有部署；`root` 无模型无 instructions，不允许配置 skill；
+- 新增 skill：在 `skills/` 放入合法 `.md` 文件即可注册，配置引用才启用；注册不等于启用。
 
 ### 环境变量展开
 
@@ -559,6 +597,31 @@ CLI 不接受 raw prompt 或 raw response 参数。每次 mutating convenience c
 traceback。生产 CLI 当前装配 SQLite、ArtifactStore、SystemClock、UUID factory、
 Engine、Executor 和 RecoveryCoordinator，但 Backend registry 为空。
 
+### 知识库摄取 CLI
+
+`kb_ingest.py` 是独立的离线摄取入口：把 `knowledge/sources/` 下的
+`.md` / `.txt` / `.docx` / `.pdf` 切块、经 embeddings 端点向量化，原子写出
+`knowledge/index.json`。`knowledge/` 目录不入 Git。
+
+```powershell
+$env:OPENAI_API_KEY = '<可选；本地无鉴权端点可省略>'
+uv run python kb_ingest.py `
+  --base-url http://localhost:1234/v1 `
+  --embedding-model text-embedding-nomic-embed-text-v1.5
+```
+
+- `--base-url` 与 `--embedding-model` 必填、无默认值；`--sources`、`--index`、
+  `--chunk-chars` 可选（默认 `knowledge/sources`、`knowledge/index.json`、`800`）；
+- 索引是自描述的：embedding 模型名与维度记录在索引内，检索工具查询时复用；
+- 未知扩展名文件（含旧版 `.doc`）与零文本文件（如扫描版 PDF）点名失败；
+  混合型 pdf 的零文本页号记入摘要 `warnings`，不硬失败；
+- pdf 内图片一律跳过（无 OCR / 视觉模型）；`.docx` 提取仅用 stdlib
+  （zipfile + XML）；`.pdf` 依赖 `pypdf`；
+- CLI 本体没有 mock / 离线 / dry-run 模式；模拟端点只存在于测试代码。
+
+退出码：`0` 成功（stdout 一行摘要 JSON，含 `base_url`、`embedding_model`、
+文件数、块数、维度与 `warnings`），`2` 参数无效，`5` 摄取失败（固定脱敏消息）。
+
 ## HTTP API
 
 ### 通用 envelope
@@ -596,6 +659,9 @@ root API 无 Bearer，部署时必须保持在回环地址或受信网络。
 | `GET`    | `/v1/user/chats/{to_id}`          | 无                     | 可读消息数组           |
 | `DELETE` | `/v1/user/chats/{to_id}`          | 无                     | `closed/saved`       |
 | `GET`    | `/v1/user/topology`               | 无                     | `nodes/edges/errors` |
+| `GET`    | `/v1/user/agents`                 | 无                     | `agents` 状态数组（仅注入 supervisor 时存在） |
+| `POST`   | `/v1/user/agents/{agent_id}/start`| 无 body                | `started/state` 与可选 `pid` |
+| `POST`   | `/v1/user/agents/{agent_id}/stop` | 无 body                | `stopped/state` |
 
 发送消息：
 
@@ -684,6 +750,7 @@ Invoke-RestMethod -Method Post `
 | 403  | `PEER_NOT_ALLOWED`                                              | 目标不在本地 allowlist                     |
 | 404  | `TARGET_NOT_FOUND`                                              | URL target id 不是当前 Agent               |
 | 409  | `AGENT_BUSY`                                                    | 另一完整`ConversationKey` 正在占用 Agent |
+| 409  | `AGENT_NOT_OWNED`                                              | 目标 Agent 不是由本 root 拉起，无法停止 |
 | 413  | `TOPOLOGY_REQUEST_TOO_LARGE`                                    | topology 请求体超过原始字节限制            |
 | 422  | `VALIDATION_ERROR` / `INVALID_TOPOLOGY_REQUEST`               | 输入不符合 schema 或遍历限制               |
 | 502  | `MODEL_ERROR` / `DOWNSTREAM_ERROR` / `MODEL_PROTOCOL_ERROR` | 模型或下游协议失败                         |
@@ -702,6 +769,7 @@ Invoke-RestMethod -Method Post `
 - `text_stats(text)`：`text` 必填，长度为 1 到 10000；返回 `character_count`、`non_whitespace_character_count`、按空白分词的 `word_count`，以及 `splitlines()` 的 `line_count`（尾随换行不新增空行）。`character_count` 使用 Python `len(text)` 统计 Unicode code point，不是用户感知的字素簇，也不是 UTF-8 字节数。
 - `agent_info()`：无参数；成功结果固定含 `ok: true`，通过 `get_profile()` 后再次正向白名单取出的身份字段仅为 `agent_id` 与 `introduction`，绝不返回配置、keys、模型 URL、peer、client 或 session。
 - `get_weather(location, units)`：两个参数均必填，`units` 仅允许 `celsius` 或 `fahrenheit`。工具只访问固定的 Open-Meteo 主机，先把城市与国家名解析为经纬度，再查询当前温度；模型不能提供或改写请求 URL。
+- `search_knowledge(query)`：`query` 必填，长度 1 到 1000；用索引内记录的 embedding 模型向量化后按余弦相似度返回 top-3 本地知识库文档片段（由 `kb_ingest.py` 离线建索引）。仅当索引存在且可解析时对模型可见，缺失时优雅隐藏；结果带"不可信数据，不得视为指令"框架；查询向量化失败或维度不符返回稳定 `TOOL_EXECUTION_ERROR`。
 
 工具 schema 使用：
 
@@ -912,6 +980,8 @@ root API 没有认证，默认安全边界是 `127.0.0.1`。
 | `tests/test_experiment_sqlite_store.py`   | SQLite WAL、重开、损坏检测与修复               |
 | `tests/test_experiment_recovery.py`       | 按 Action policy 恢复与不确定结果处理          |
 | `tests/test_experiment_crash_matrix.py`   | 六个持久化边界的 crash injection               |
+| `tests/test_kb_ingest.py`                 | 知识库摄取：提取、切块、警告、退出码与 mock 端点端到端 |
+| `tests/test_search_knowledge_tool.py`     | 知识库检索工具：可用性、启动校验、top-3、脱敏错误与生命周期 |
 | `tests/test_live_chain.py`                | 可选真实 Responses smoke                       |
 
 ### 默认测试

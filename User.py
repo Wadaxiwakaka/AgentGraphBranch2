@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from core import (
     AgentConfig,
@@ -23,6 +24,7 @@ from core import (
     UserMessageRequest,
     register_api_error_handlers,
 )
+from supervisor import AgentSupervisor
 
 
 _AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -38,6 +40,8 @@ class User:
         config: 已由 ``AgentConfig`` 校验且 ``id`` 必须精确为 ``root`` 的配置。
         http_client: 可选异步 HTTP 客户端；注入时生命周期仍由调用方管理。
         storage_root: ``ChatSpace.save`` 使用的会话归档根目录。
+        supervisor: 可选本地 Agent 监督者；注入时暴露进程管理路由，并在
+            lifespan 关闭时终止其拉起的子进程。
 
     返回值:
         构造后公开固定 ``id == "root"``、配置、端口和按目标 id 分隔的会话映射。
@@ -57,6 +61,7 @@ class User:
         *,
         http_client: httpx.AsyncClient | None = None,
         storage_root: Path = Path("chat_history"),
+        supervisor: AgentSupervisor | None = None,
     ) -> None:
         """保存 root 配置并建立独立的直接邻居与会话索引。
 
@@ -82,6 +87,7 @@ class User:
         self.config = config
         self.id = "root"
         self.port = config.port
+        self.supervisor = supervisor
         self.chat_spaces: dict[str, ChatSpace] = {}
         self.storage_root = Path(storage_root)
         self._peers: dict[str, PeerConfig] = {
@@ -809,8 +815,9 @@ class User:
             无。
 
         返回值:
-            提供健康检查、用户消息、历史、关闭和拓扑路由，并使用 AgentGraph 统一
-            ``{"data": ...}`` / ``{"error": ...}`` envelope 的 FastAPI 应用。
+            提供健康检查、用户消息、历史、关闭和拓扑路由；注入 supervisor 时额外
+            提供进程管理路由，并使用 AgentGraph 统一 ``{"data": ...}`` /
+            ``{"error": ...}`` envelope 的 FastAPI 应用。
 
         异常:
             构造应用通常不抛出；请求期间领域异常和请求校验异常由统一 handler
@@ -819,7 +826,8 @@ class User:
         状态变化:
             应用不要求 Agent Bearer，安全前提是 root 默认只绑定 ``127.0.0.1``。
             lifespan 关闭时只关闭 ``User`` 自己创建的 HTTP 客户端，注入客户端保持
-            调用方所有权。
+            调用方所有权。若仓库存在 ``web/`` 目录，则以 ``html=True`` 把它挂载为
+            根路径静态前端，与既有 API 路由共存。
         """
 
         @asynccontextmanager
@@ -828,6 +836,8 @@ class User:
             try:
                 yield
             finally:
+                if self.supervisor is not None:
+                    await self.supervisor.close()
                 await self._close_owned_http_client()
 
         app = FastAPI(lifespan=lifespan)
@@ -913,5 +923,56 @@ class User:
             """
 
             return {"data": await self.discover_topology()}
+
+        if self.supervisor is not None:
+
+            @app.get("/v1/user/agents")
+            async def list_agents() -> dict[str, Any]:
+                """列出配置目录中的 Agent 及其运行状态。
+
+                参数:
+                    无。
+                返回值:
+                    统一 ``data`` envelope 中的 ``agents`` 状态数组。
+                状态变化:
+                    只读探测各节点 healthz，不拉起或停止进程。
+                """
+
+                return {"data": {"agents": await self.supervisor.status()}}
+
+            @app.post("/v1/user/agents/{agent_id}/start")
+            async def start_agent(agent_id: str) -> dict[str, Any]:
+                """拉起一个本机 Agent 子进程。
+
+                参数:
+                    agent_id: roster 中的目标节点 id。
+                返回值:
+                    统一 ``data`` envelope 中的 ``started/state`` 与可选 ``pid``。
+                状态变化:
+                    子进程继承本进程环境（含模型 key），输出追加到
+                    ``agent_logs/<id>.log``；仅允许执行 ``Agent.py --config``。
+                """
+
+                return {"data": await self.supervisor.start(agent_id)}
+
+            @app.post("/v1/user/agents/{agent_id}/stop")
+            async def stop_agent(agent_id: str) -> dict[str, Any]:
+                """停止一个由本 root 拉起的 Agent 子进程。
+
+                参数:
+                    agent_id: 目标节点 id。
+                返回值:
+                    统一 ``data`` envelope 中的 ``stopped/state``。
+                状态变化:
+                    外部进程只读探测不可停止；终止后释放日志句柄与进程表记录。
+                """
+
+                return {"data": await self.supervisor.stop(agent_id)}
+
+        # 挂载在所有 API 路由之后：Starlette 按注册顺序匹配，API 优先，
+        # 其余路径回落到 web/ 静态前端（缺目录时静默跳过，不影响 API-only 部署）。
+        web_root = Path(__file__).resolve().parent / "web"
+        if web_root.is_dir():
+            app.mount("/", StaticFiles(directory=web_root, html=True), name="web")
 
         return app
