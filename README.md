@@ -56,7 +56,8 @@ AgentGraphInternet 是一个使用 Python、FastAPI、HTTPX 和 OpenAI Responses
 | root CLI                     | 已完成 | talk、topology、history、close、quit                                                         |
 | 确定性端到端测试             | 已完成 | root→Agent1→Agent2 的真实 ASGI/HTTP 链路                                                   |
 | 真实模型 smoke               | 可选   | 仅在显式环境开关和本地 20128 服务存在时运行                                                  |
-| Web 前端                     | 未实现 | 已保留稳定 HTTP API                                                                          |
+| Web 前端                     | 已完成 | `web/` 静态页面由 root 以 `html=True` 挂载于根路径，聊天/历史/关闭/拓扑图同源调用 root API，无构建依赖 |
+| Web 进程管理                  | 已完成 | `supervisor.py` 从 root 配置目录枚举节点，网页可拉起/停止本机 Agent 子进程（仅回环，仅限本实例拉起的进程） |
 | Agent 数据面分布式运行与恢复 | 未实现 | 当前 Agent 会话和锁只在单进程内存中                                                          |
 | Attempt 状态内核控制面       | 已完成 | 独立`experiment_system` 包、SQLite WAL、artifact、outbox、暂停、外部输入和恢复             |
 | 本地 Attempt CLI             | 已完成 | create/status/pause/resume/cancel/submit-input/recover；不启动 live Backend                  |
@@ -327,6 +328,9 @@ uv run python Agent.py --config agents_setting/root.json --interactive
 
 ### 4. 发起对话
 
+root 同时在 `http://127.0.0.1:9860/` 提供网页前端：左侧选择直接可见的 Agent 开始聊天，右侧查看拓扑图；功能与 CLI 等价，另有会话内 pending 计时与拓扑局部错误展示。无前端构建步骤，`web/` 目录由 root 自动挂载。
+
+网页还可以直接拉起 Agent 子进程：只需要先启动 root（所在终端需已设置 `OPENAI_API_KEY`，子进程继承该环境），打开页面后在左侧点「启动」，Agent1/Agent2 会以后台子进程方式运行，输出写入 `agent_logs/<id>.log`；root 退出时会终止自己拉起的全部子进程。也可以继续按原方式手动开窗口启动：
 ```text
 /talk Agent1 请询问Agent2在干嘛
 ```
@@ -345,6 +349,9 @@ uv run python Agent.py --config agents_setting/root.json --interactive
 ```text
 AgentGraph/
 ├─ Agent.py                      # 统一配置入口、Uvicorn 和 root CLI
+├─ supervisor.py                 # root 的本地 Agent 子进程监督者
+├─ web/                          # root 挂载的零依赖静态前端（index/app/style）
+├─ agent_logs/                   # 网页拉起的子进程输出日志（不入 Git）
 ├─ AgentRemote.py                # 普通 Agent、工具循环、并发、拓扑
 ├─ User.py                       # root 网关、会话管理和 root API
 ├─ core.py                       # 配置、schema、错误和 ChatSpace
@@ -652,6 +659,9 @@ root API 无 Bearer，部署时必须保持在回环地址或受信网络。
 | `GET`    | `/v1/user/chats/{to_id}`          | 无                     | 可读消息数组           |
 | `DELETE` | `/v1/user/chats/{to_id}`          | 无                     | `closed/saved`       |
 | `GET`    | `/v1/user/topology`               | 无                     | `nodes/edges/errors` |
+| `GET`    | `/v1/user/agents`                 | 无                     | `agents` 状态数组（仅注入 supervisor 时存在） |
+| `POST`   | `/v1/user/agents/{agent_id}/start`| 无 body                | `started/state` 与可选 `pid` |
+| `POST`   | `/v1/user/agents/{agent_id}/stop` | 无 body                | `stopped/state` |
 
 发送消息：
 
@@ -740,6 +750,7 @@ Invoke-RestMethod -Method Post `
 | 403  | `PEER_NOT_ALLOWED`                                              | 目标不在本地 allowlist                     |
 | 404  | `TARGET_NOT_FOUND`                                              | URL target id 不是当前 Agent               |
 | 409  | `AGENT_BUSY`                                                    | 另一完整`ConversationKey` 正在占用 Agent |
+| 409  | `AGENT_NOT_OWNED`                                              | 目标 Agent 不是由本 root 拉起，无法停止 |
 | 413  | `TOPOLOGY_REQUEST_TOO_LARGE`                                    | topology 请求体超过原始字节限制            |
 | 422  | `VALIDATION_ERROR` / `INVALID_TOPOLOGY_REQUEST`               | 输入不符合 schema 或遍历限制               |
 | 502  | `MODEL_ERROR` / `DOWNSTREAM_ERROR` / `MODEL_PROTOCOL_ERROR` | 模型或下游协议失败                         |
